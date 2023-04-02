@@ -3,34 +3,33 @@ using Microsoft.Identity.Client;
 using System.Net;
 using System.Net.Http.Headers;
 using System.Security.Cryptography.X509Certificates;
+using XAct;
 
 namespace HttpClientCallerApp
 {
     public class Program
     {
-        static HttpClient client = new HttpClient();
-        private string appId = string.Empty;
+        private HttpResponseMessage message = null;
         private string pathToZippedFile = string.Empty;
+        private string appId = string.Empty;
         private string tenantId = string.Empty;
         private string certName = string.Empty;
+        private string connectorId = string.Empty;
+        private string ingestionId = string.Empty;
 
         static void Main()
         {
             var program = new Program();
-            program.TakeInputs();
+            program.RunAsync(program).GetAwaiter().GetResult();
         }
 
-        public void TakeInputs()
+        public async Task RunAsync(Program prog, bool firstRun = true)
         {
-            var emptyInput = true;
-            while (emptyInput)
+            if (firstRun)
             {
                 Console.WriteLine("Please enter the following values. \nNote: no quotation marks required around the responses.\n\n");
                 Console.WriteLine("AppId/Client ID:");
                 appId = Console.ReadLine() ?? appId;
-
-                Console.WriteLine("\nPlease enter the absolute path to the zipped file you wish to upload.\nFor example: C:\\\\Users\\\\JaneDoe\\\\OneDrive - Microsoft\\\\Desktop\\\\info.zip");
-                pathToZippedFile = Console.ReadLine() ?? pathToZippedFile;
 
                 Console.WriteLine("\nAzure Active Directory (AAD) Tenant ID:");
                 tenantId = Console.ReadLine() ?? tenantId;
@@ -38,34 +37,83 @@ namespace HttpClientCallerApp
                 Console.WriteLine("\nCertificate name for your registered application:");
                 certName = Console.ReadLine() ?? certName;
 
-                if (appId == string.Empty || pathToZippedFile == string.Empty || tenantId == string.Empty || certName == string.Empty)
+                if (appId == string.Empty || tenantId == string.Empty || certName == string.Empty)
                 {
                     Console.WriteLine("\nNone of the inputs can be empty strings or nulls. \nPlease go through the process again to upload your file.\n");
-                    emptyInput = true;
                 }
                 else if (!IsGuid(appId) || !IsGuid(tenantId))
                 {
                     Console.WriteLine("\nThe appId and/or the tenantId is not a valid Guid.\nPlease go through the process again to upload your file.\n");
-                    emptyInput = true;
-                }
-                else
-                {
-                    emptyInput = false;
                 }
             }
-            new Program().RunAsync(appId, pathToZippedFile, tenantId, certName).GetAwaiter().GetResult();
+
+            Console.WriteLine("\nEnter 1 if you would like to upload data.\nEnter 2 if you would like to check the status of an existing ingestion.\n");
+            var inputChoice = Console.ReadLine().ToInt16();
+            InputState uploadZipEnterDetails = inputChoice == 1 ? InputState.Chosen : InputState.NotChosen;
+            InputState getStatusEnterDetails = inputChoice == 2 ? InputState.Chosen : InputState.NotChosen;
+
+            if (uploadZipEnterDetails == InputState.Chosen)
+            {
+                UploadZipDetailsInput();
+                uploadZipEnterDetails = InputState.EnteredValues;
+            }
+
+            if (getStatusEnterDetails == InputState.Chosen)
+            {
+                GetStatusDetailsInput();
+                getStatusEnterDetails = InputState.EnteredValues;
+            }
+
+            var appToken = await prog.GetAppToken(tenantId, appId, certName);
+            var bearerToken = string.Format("Bearer {0}", appToken);
+            var apiToAccess = "";
+
+            if (uploadZipEnterDetails == InputState.EnteredValues && getStatusEnterDetails == InputState.NotChosen) 
+            {
+                await PostUploadFile(prog, bearerToken, pathToZippedFile, tenantId);
+            }
+            else if (uploadZipEnterDetails == InputState.NotChosen && getStatusEnterDetails == InputState.EnteredValues)
+            {
+                await GetStatusOfUpload(prog, bearerToken, tenantId, connectorId, ingestionId);
+            }
         }
 
-        private async Task RunAsync(string appId, string pathToZippedFile, string tenantId, string certName)
+        private void UploadZipDetailsInput()
         {
-            var appToken = await new Program().GetAppToken(tenantId, appId, certName);
-            var bearerToken = string.Format("Bearer {0}", appToken);
+            Console.WriteLine("\nPlease enter the absolute path to the zipped file you wish to upload.\nFor example: C:\\\\Users\\\\JaneDoe\\\\OneDrive - Microsoft\\\\Desktop\\\\info.zip");
+            pathToZippedFile = Console.ReadLine() ?? pathToZippedFile;
 
+            if (pathToZippedFile == string.Empty)
+            {
+                Console.WriteLine("\nNone of the inputs can be empty strings or nulls. \nPlease go through the process again to upload your file.\n");
+                return;
+            }
+        }
+
+        private async Task GetStatusOfUpload(Program prog, string bearerToken, string tenantId, string connectorId, string ingestionId)
+        {
+            HttpClient client = new HttpClient();
             client.DefaultRequestHeaders.TryAddWithoutValidation("Authorization", bearerToken);
             client.DefaultRequestHeaders.Accept.Clear();
             client.DefaultRequestHeaders.Accept.Add(
                 new MediaTypeWithQualityHeaderValue("application/json"));
-            
+            var apiToAccess = string.Format(
+                "{0}/{1}/ingress/connectors/{2}/ingestions/fileIngestion/{3}",
+                Constants.NovaPrdApi,
+                tenantId,
+                connectorId,
+                ingestionId);
+            var message = await client.GetAsync(apiToAccess);
+            await PrintOutput(prog, message, false, true);
+        }
+
+        private async Task PostUploadFile(Program prog, string bearerToken, string pathToZippedFile, string tenantId)
+        {
+            HttpClient client = new HttpClient();
+            client.DefaultRequestHeaders.Accept.Clear();
+            client.DefaultRequestHeaders.Accept.Add(
+                new MediaTypeWithQualityHeaderValue("application/json"));
+            client.DefaultRequestHeaders.TryAddWithoutValidation("Authorization", bearerToken);
             var form = new MultipartFormDataContent();
             var byteArray = File.ReadAllBytes(pathToZippedFile);
             form.Add(new ByteArrayContent(byteArray, 0, byteArray.Length), "info", pathToZippedFile);
@@ -73,15 +121,48 @@ namespace HttpClientCallerApp
                 "{0}/{1}/ingress/connectors/HR/ingestions/fileIngestion",
                 Constants.NovaPrdApi,
                 tenantId);
+            var message = await client.PostAsync(apiToAccess, form);
+            await PrintOutput(prog, message, true, false);
+        }
 
+        private void GetStatusDetailsInput()
+        {
+            Console.WriteLine("Please enter the following values. \nNote: no quotation marks required around the responses.");
+            Console.WriteLine("\nConnector ID:");
+            connectorId = Console.ReadLine() ?? connectorId;
+
+            Console.WriteLine("\nIngestion ID:");
+            ingestionId = Console.ReadLine() ?? ingestionId;
+
+            if (connectorId == string.Empty || ingestionId == string.Empty)
+            {
+                Console.WriteLine("\nNone of the inputs can be empty strings or nulls. \nPlease go through the process again.\n");
+                return;
+            }
+        }
+
+        private enum InputState
+        {
+            NotChosen,
+            EnteredValues,
+            Chosen
+        }
+
+        private async Task PrintOutput(Program prog, HttpResponseMessage message, bool showMainMenu, bool sourceIsGetStatus)
+        {
             try
             {
-                HttpResponseMessage message = await client.PostAsync(apiToAccess, form);
-
                 if (message.StatusCode == HttpStatusCode.OK)
                 {
                     string responseBody = await message.Content.ReadAsStringAsync();
-                    Console.WriteLine($"\nRequest Status was success.\nIngestion is in progress. To check status, please visit the site.\n\nHere is the returned content:\n {responseBody})");
+                    var contentForUpload = $"\nRequest Status was success.\nIngestion is in progress.\n\nHere is the returned content:\n {responseBody}.\n\nNote \"ConnectorId\" and \"Id(IngestionId)\" to ping for status.\n";
+                    var contentForStatus = $"\nRequest Status was success.\nIngestion Status: {responseBody}.\n";
+                    var contentToPrint = sourceIsGetStatus ? contentForStatus : contentForUpload;
+                    Console.WriteLine(contentToPrint);
+                    if (showMainMenu)
+                    {
+                        prog.RunAsync(prog, false).GetAwaiter().GetResult();
+                    }
                 }
                 else
                 {
@@ -92,7 +173,6 @@ namespace HttpClientCallerApp
             {
                 Console.WriteLine(e.Message);
             }
-
             Console.ReadLine();
         }
 
