@@ -29,4 +29,6 @@ Follow these steps to set up your console application:
 4. Lastly, you will need to enter the Certificate Name that is configured in your registered application. Follow the steps in the "Create and export your public certificate" section here: ```https://learn.microsoft.com/en-us/azure/active-directory/develop/howto-create-self-signed-certificate```.
 Once certificate is uploaded, you can use the value under 'Description' in the Azure Portal as the value here:
 ![certExample](https://user-images.githubusercontent.com/104855063/227007691-2ec0bfa5-e0db-4802-aa64-1c6530556f34.png)
+
+Very important: Ensure you enter the value as  ```CN={Name of certificate}```
 5. Enter  ```novaprdwus2-02``` when prompted for Scale Unit.
