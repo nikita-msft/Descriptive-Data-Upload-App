@@ -1,4 +1,4 @@
-# Descriptive-Data-Uploading-App
+# Descriptive-Data-Uploading-App call for testing with Survey uploads
 
 Follow these steps to set up your console application:
 1. First, clone the app. To do this, open command prompt and enter: ```git clone https://github.com/nikita-msft/Descriptive-Data-Upload-App.git```.
